@@ -1,0 +1,13 @@
+# secrets
+.env
+
+# SQLite send log and its WAL siblings
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# python
+__pycache__/
+.pytest_cache/
+*.pyc
