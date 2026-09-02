@@ -1,0 +1,9 @@
+Closing out quote {quote_label}.
+
+If the {work_summary} is going ahead, now is the time to say so and I will hold the price.
+If not, say the word and I will close it off.
+
+{from_name}
+{from_address}
+
+To stop hearing about this quote, reply with the word STOP.

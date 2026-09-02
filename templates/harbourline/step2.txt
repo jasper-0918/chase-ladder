@@ -1,0 +1,11 @@
+Still keen on this one?
+
+Quote {quote_label} for {work_summary} is sitting at {currency} {amount}. It stays valid,
+so there is no rush, I just did not want it to go quiet on you.
+
+If the timing is wrong, tell me when to come back and I will.
+
+{from_name}
+{from_address}
+
+To stop hearing about this quote, reply with the word STOP.

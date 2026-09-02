@@ -1,0 +1,46 @@
+client: harbourline
+business_name: Harbourline Digital
+city: Sydney
+currency: AUD
+from_name: Harbourline Digital
+from_address: quotes@harbourline.example
+reply_domain: harbourline.example        # Reply-To becomes quotes+<deal_id>@harbourline.example
+tone: friendly, plain, one short question at the end
+work_categories:                         # the only values that may reach the model, spec 4.9
+  - brand identity
+  - website rebuild
+  - SEO retainer
+  - ecommerce build
+  - content strategy
+  - design system
+
+ladder:
+  - step: 1
+    days_after_sent: 3
+    subject: "Quote {quote_label}: any questions?"
+    template: templates/harbourline/step1.txt
+    opener: groq                         # the only AI-written sentence in the system
+  - step: 2
+    days_after_sent: 7
+    subject: "Still keen on {quote_label}?"
+    template: templates/harbourline/step2.txt
+    opener: template
+  - step: 3
+    days_after_sent: 14
+    subject: "Last check on {quote_label}"
+    template: templates/harbourline/step3.txt
+    opener: template
+
+send_window:
+  days: [mon, tue, wed, thu, fri]
+  start: "08:00"
+  end: "18:00"
+  tz: Australia/Sydney
+
+stop_on:
+  stages: [Won, Lost]                    # checked in the direct read of each due deal before a claim
+
+digest:
+  day: fri
+  time: "16:00"                          # in send_window.tz; push_n8n.py copies day and time into n8n
+  stale_after_days: 7                    # the "untouched for 7+ days" threshold

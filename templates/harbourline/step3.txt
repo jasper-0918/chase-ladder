@@ -1,0 +1,11 @@
+Last check on {quote_label}.
+
+If {work_summary} is off the table, no problem at all, and it helps me to know.
+If it is still live, reply and I will pick it back up where we left it.
+
+Either way this is the last you will hear from me about this one.
+
+{from_name}
+{from_address}
+
+To stop hearing about this quote, reply with the word STOP.

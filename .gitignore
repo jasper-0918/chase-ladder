@@ -11,3 +11,6 @@ data/
 __pycache__/
 .pytest_cache/
 *.pyc
+
+# process notes, not part of the deliverable
+.learnings/

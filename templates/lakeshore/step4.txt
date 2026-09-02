@@ -1,0 +1,8 @@
+Closing quote {quote_label} today.
+
+{work_summary} at {currency} {amount}. No reply needed if it is dead, I will file it.
+
+{from_name}
+{from_address}
+
+To stop hearing about this quote, reply with the word STOP.

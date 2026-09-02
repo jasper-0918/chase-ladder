@@ -1,0 +1,51 @@
+client: lakeshore
+business_name: Lakeshore Fitout
+city: Chicago
+currency: USD
+from_name: Lakeshore Fitout
+from_address: quotes@lakeshorefitout.example
+reply_domain: lakeshorefitout.example
+tone: direct, short, no small talk
+work_categories:
+  - office fitout
+  - retail fitout
+  - joinery package
+  - partition works
+  - ceiling works
+  - site make-good
+
+ladder:
+  - step: 1
+    days_after_sent: 2
+    subject: "Your fit-out quote {quote_label}"
+    template: templates/lakeshore/step1.txt
+    opener: groq
+  - step: 2
+    days_after_sent: 5
+    subject: "Quote {quote_label}, still open"
+    template: templates/lakeshore/step2.txt
+    opener: template
+  - step: 3
+    days_after_sent: 10
+    subject: "Closing out quote {quote_label}"
+    template: templates/lakeshore/step3.txt
+    opener: template
+  - step: 4
+    days_after_sent: 20
+    subject: "Closing quote {quote_label}"
+    template: templates/lakeshore/step4.txt
+    opener: template
+
+send_window:
+  days: [mon, tue, wed, thu, fri, sat]   # Saturday is a working day on a fit-out site
+  start: "09:00"
+  end: "17:00"
+  tz: America/Chicago
+
+stop_on:
+  stages: [Won, Lost]
+
+digest:
+  day: fri
+  time: "15:00"
+  stale_after_days: 5
