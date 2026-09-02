@@ -1,0 +1,10 @@
+{opening_line}
+
+Just checking you got the quote for {work_summary}, {quote_label}, at {currency} {amount}.
+
+Happy to walk through any part of it, or adjust the scope if something is off.
+
+{from_name}
+{from_address}
+
+To stop hearing about this quote, reply with the word STOP.

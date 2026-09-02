@@ -1,0 +1,10 @@
+{opening_line}
+
+Quote {quote_label} for the {work_summary} came to {currency} {amount}.
+
+Any questions on scope or program, send them over.
+
+{from_name}
+{from_address}
+
+To stop hearing about this quote, reply with the word STOP.

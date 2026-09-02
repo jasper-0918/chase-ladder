@@ -1,0 +1,8 @@
+Quote {quote_label} is still open.
+
+{work_summary}, {currency} {amount}. Let me know if you want it revised or if the dates moved.
+
+{from_name}
+{from_address}
+
+To stop hearing about this quote, reply with the word STOP.
