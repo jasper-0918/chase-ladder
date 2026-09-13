@@ -1,13 +1,50 @@
 # Chase Ladder
 
-Quote follow-up for a small business that runs on HubSpot Free. One YAML file per client sets the
-ladder, the sending hours and the templates; Python does every decision and is tested; n8n is the
-scheduler and the notifier; SQLite is the send log; HubSpot is the only place quotes live.
+Chase Ladder chases quotes a small business sent and never heard back on. It is designed to read
+open deals from HubSpot Free and email each customer at set steps, such as 3, 7 and 14 days after
+the quote. The design stops the chase when the customer replies or the deal is won or lost.
+
+## Status, 2026-09-13
+
+Not usable yet: no command sends real email or reads a real inbox.
+
+Built and tested on `main`, with 176 tests passing:
+
+- the clock, YAML loader and ladder arithmetic
+- the send window and SQLite send log
+- the templates, run report and `run_ladder`
+- `HubSpotClient`, over a fake transport
+
+`status` and `reset` work. `run` exits 2 with a message that still lists the HubSpot client as
+missing. `SmtpSender` is written but not wired or tested.
+
+Designed, not built:
+
+- reply detection through Mailpit
+- the HTTP routes and the Friday digest over Telegram
+- n8n scheduling and the Groq opening line
+- HubSpot seeding, `doctor`, Docker Compose and the demo video
+
+Known gaps:
+
+- No test fails if `db.claim` or `db.record_stop` uses a plain `BEGIN`.
+- `run_ladder` reads and claims one due deal at a time, where the spec reads them all first. A
+  failed read partway aborts the run after earlier sends and loses its report.
+- `run._send_one` stamps each claim with the run's `now`, not the clock at claim time. In a run
+  longer than the grace window, five minutes by default, a late claim can look unresolved to
+  `status` or an overlapping run while it is still sending.
+- An error while building the message, after the claim, leaves the row `claimed` with nothing
+  sent. The run then ends without a report.
+- `patch_after_send` moves a Sent deal to Chasing from the stage read before the send and never
+  reads again. A move to Won or Lost during the send is undone, and later runs keep chasing.
+- `send_window.tz` is not checked at load, so a misspelt zone fails after the reply poll.
+- `run_ladder` moves a Sent or Chasing deal to Replied for any earlier reply stop. The spec limits
+  it to this run's.
 
 ## What it claims
 
-This paragraph was written before any schema, and it is the ceiling on what this README and the
-demo may say. Nothing below it is allowed to claim more.
+Section 1 of the design spec, written before any schema, caps what this README and any demo may
+claim for the finished system.
 
 > Every quote a business sends is chased on a schedule the business sets in one YAML file, and the
 > chasing stops when the customer replies, when the deal is moved to Won or Lost, or when someone
@@ -17,36 +54,99 @@ demo may say. Nothing below it is allowed to claim more.
 > retried automatically. There is **no lost update between a stop and a claim**, because the run and
 > the stop both write the same SQLite file under `BEGIN IMMEDIATE`; the Won/Lost path is a direct
 > HubSpot read of each due deal before any claim, once per run, with an inherent window this
-> project names. A Friday digest says **which quotes are still unanswered and how much is sitting
-> in them**.
+> [design] document names. A Friday digest says **which quotes are still unanswered and how much is
+> sitting in them**.
 
-Read the wording literally. It is *at most one successful send*, not "exactly once": the email
-leaves over SMTP, outside the SQLite transaction, so a send whose outcome is ambiguous (timeout,
-connection reset) stays `claimed`, is never auto-retried, and surfaces in the run report as
-`unresolved`. A send the server actively refused is a different case, marked `failed` and retryable.
+Read it literally. The email leaves over SMTP, outside the SQLite transaction. The named window:
+a reply after the reply poll, or a move to Won or Lost after the direct read, can still get that
+run's email. The next run's poll stops a late reply. A late move to Won or Lost is caught by the
+next run's direct read, unless the deal was in Sent: the send's PATCH moves it back to Chasing.
 
-## Status
+Tests on `main` already back these parts:
 
-In build. The offline core is on `main`: the clock, the config loader, the ladder arithmetic, the
-SQLite claim transaction under `BEGIN IMMEDIATE`, the templates, the run loop and the CLI, with 145
-tests passing. The HubSpot client, the Mailpit reply path, the HTTP routes, the Friday digest and
-the n8n workflow are the next two sittings, and the claims above describe the finished system, not
-today's tree.
+- at most one successful send per quote and step
+- a refused send retried until a later step comes due
+- zero new rows on a re-run
+- an ambiguous send left `claimed`
+- a fresh HubSpot read of each due deal before its claim
 
-## Design
+## Notes on the code
 
-The full design lives in
-[`docs/superpowers/specs/2026-08-29-chase-ladder-design.md`](docs/superpowers/specs/2026-08-29-chase-ladder-design.md):
-architecture, the data model, the run report, failure handling, the seeded-versus-measured rules,
-a verified-facts table where every vendor limit carries a URL or the word unverified, and the
-testing plan.
+**The claim transaction.** `db.claim` opens `BEGIN IMMEDIATE` and holds the write lock before
+reading `stops`. Its insert ends in `ON CONFLICT (deal_id, step) DO UPDATE ... WHERE
+reminder_log.status = 'failed'`, so only a refused step can be claimed again. `tests/test_claim.py`
+runs a claim and a stop on two threads and checks the end state. Its lock test issues
+`BEGIN IMMEDIATE` by hand, not through `db.claim`.
+
+**Refused versus ambiguous sends.** `run._send_one` marks a `RefusedBeforeDelivery` as `failed`.
+Any other exception from the send, a timeout included, leaves the row `claimed`, since the server
+may already hold the message. `tests/test_run.py` tests this with a fake mailer and a stand-in for
+`db.claim`. Nothing tests the smtplib errors listed in `mailer._REFUSALS`.
+
+**Stage labels resolved to ids.** The run uses stage labels and HubSpot's `dealstage` holds ids, so
+`HubSpotClient` maps them from one pipeline read. `tests/test_hubspot_integration.py` runs
+`run_ladder` through the real client, `db.claim` and `in_send_window` over a fake transport. Two of
+four deals are sent, one is stopped as Won by its direct read, and the first-step PATCH moves its
+deal by stage id, not label. It has no failed send.
+
+**DST tests with real dates.** `in_send_window` converts to the client's IANA zone first.
+`tests/test_window.py` requires 2026-10-03T16:00Z to fall inside a Sunday 03:00 to 04:00 Sydney
+window, where a fixed +10 hours gives 02:00. Both 01:30s of 2026-11-01 in Chicago must fall inside
+01:00 to 02:00.
+
+**One clock.** Only `chase/clock.py` in the package calls `datetime.now(`, and
+`CHASE_CLOCK_OFFSET` shifts it for demos. `tests/test_no_datetime_now.py` checks by text search, so
+an aliased import slips past it.
+
+## Demo data
+
+Harbourline Digital (Sydney) and Lakeshore Fitout (Chicago) are fictional. Every email address in
+tracked files is under the reserved `.example` top-level domain, plus one `unknown@example.invalid`
+fallback. Lakeshore is never seeded into HubSpot and is exercised only by tests: HubSpot Free has
+one pipeline, the design adds no field to split businesses, and `search_candidates` ignores its
+client argument.
 
 ## Running the tests
 
-```
-pip install -r requirements.txt
+Needs Python 3.12 or newer, because `db.connect` passes `autocommit=True`.
+
+```text
+python -m pip install -r requirements.txt
 python -m pytest -q
+python -m chase status
 ```
 
-No credentials are needed for the suite, and nothing in this repository can authenticate to
-anything. Copy `.env.example` to `.env` and fill it in by hand for the live paths.
+Tests need no credentials or network and ran on Python 3.14.6. Leave `CHASE_CLIENT` and
+`CHASE_UNRESOLVED_AFTER` unset: `tests/test_cli.py` expects the default client, and a blank grace
+window fails five tests. `status` writes the gitignored `data/chase.db`. `fastapi` and `uvicorn`
+are for the unbuilt HTTP routes.
+
+`.env.example` names the variables the finished system uses, but nothing reads `.env`. The code
+reads only `CHASE_CLIENT`, `CHASE_CLOCK_OFFSET` and `CHASE_UNRESOLVED_AFTER`, from the shell. Unset,
+each takes a default. A blank offset stops `status` with a `ValueError`.
+
+## Repository layout
+
+```text
+chase/clock.py      the demo clock and its offset
+chase/config.py     loads and checks config/<client>.yaml
+chase/ladder.py     which step is due
+chase/window.py     the send window in the client's zone
+chase/db.py         schema, claim, mark, record_stop
+chase/run.py        run_ladder, one pass
+chase/hubspot.py    HubSpotClient
+chase/mailer.py     Message-IDs, SmtpSender and the refusal split
+chase/templates.py  builds each email
+chase/opener.py     template opening lines and guards for a model-written one
+chase/report.py     RunReport counters
+chase/cli.py        python -m chase with status, run and reset
+config/             the two client YAML files
+templates/          seven step templates
+tests/              pytest suite with hand-written fakes, no network
+docs/               the design spec
+```
+
+## Design
+
+The [design spec](docs/superpowers/specs/2026-08-29-chase-ladder-design.md) describes the finished
+system, not the code on `main`.

@@ -1046,8 +1046,8 @@ counts; they appear in the run report and the Telegram alert only, and no per-ru
 
 The README carries this table as its second section, straight after the claims paragraph. The Loom
 introduces the seed as "here is the situation I set up". The last row applies the same rule to
-authorship: a reader can see which files Jasper typed and which Claude did, instead of the repository
-being silent about it.
+authorship: a reader can see who wrote the code and who decided and reviewed it, instead of the
+repository being silent about it.
 
 | SEEDED (Jasper wrote it) | MEASURED (the system produced it) |
 | --- | --- |
@@ -1056,7 +1056,7 @@ being silent about it.
 | "Untouched for 7+ days", because `quote_sent_at` was backdated | Seconds from `demo-reply` to the deal showing Replied in HubSpot, with the mechanism named (webhook, or poll interval) |
 | Harbourline Digital and Lakeshore Fitout, both fictional | Wall time for the run, printed by the run itself. The comparison figure, minutes to write one chase by hand, is **hand-timed by Jasper on camera**, so it is stated that way and never as a machine measurement |
 | The customer reply ("I am playing the customer"), and the drag to Won | `failed` count and the Telegram alert when `CHASE_SMTP_PORT` points at a dead port |
-| Written by Jasper's own hand: `in_send_window()` in `chase/window.py` and `claim()` in `chase/db.py` | Written by Claude: the tests for those two functions, which came first, and every other module in `chase/` |
+| Jasper's part: the design decisions he settled, an OK on every diff before commit, and every merge. He first planned to type `in_send_window()` and `claim()` himself, then handed both to Claude on 2026-09-02 | Written by Claude, tests first: every module in `chase/`, those two functions included |
 
 Rules for every README sentence and every Loom sentence:
 
@@ -1244,7 +1244,7 @@ offline core and nothing else starts until it is done; the HubSpot spikes gate n
 
 Then write the README claims paragraph (section 1) into `README.md` before any schema. Then build:
 `clock.py`; the config loader, then the tests for `in_send_window` and for `claim` before either
-function exists, because Jasper types both by hand against them (section 12); the SQLite schema with
+function exists, so the tests come first (section 12); the SQLite schema with
 WAL, busy_timeout and
 `BEGIN IMMEDIATE`; the ladder as pure functions (`due_step` from `quote_sent_at` and the YAML);
 claim-then-send over smtplib; the three Harbourline and four Lakeshore templates; the run report;
