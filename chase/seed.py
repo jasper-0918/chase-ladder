@@ -118,6 +118,69 @@ def demo_deals(client, now: datetime) -> list[SeedDeal]:
     return deals
 
 
+def is_seeded_deal(name: str) -> bool:
+    """The mark, and the whole safety rule for `reset`.
+
+    This runs against a portal that may hold real deals, so the test is made here rather
+    than trusted to a server-side name match: anything that does not carry the prefix the
+    seed wrote is somebody's real work and is never touched.
+    """
+    return bool(name) and name.startswith(DEAL_PREFIX)
+
+
+def is_seeded_contact(email: str) -> bool:
+    return bool(email) and email.lower().endswith(f"@{CONTACT_DOMAIN}")
+
+
+@dataclass
+class ArchiveReport:
+    deals: int = 0
+    contacts: int = 0
+    kept: int = 0
+    failed: int = 0
+    errors: list[str] = field(default_factory=list)
+
+    def summary_line(self) -> str:
+        return (
+            f"archived: {self.deals} deals, {self.contacts} contacts, "
+            f"left alone {self.kept}, failed {self.failed}"
+        )
+
+
+def archive_seed(hubspot) -> ArchiveReport:
+    """Take back exactly what the seed wrote, and nothing else.
+
+    Contacts go after deals so that a failure partway leaves orphaned contacts rather
+    than deals with nobody to email: the second is the shape that makes a later run look
+    broken, and the first is invisible to the ladder.
+    """
+    report = ArchiveReport()
+
+    for deal in hubspot.list_deals():
+        if not is_seeded_deal(deal.get("name", "")):
+            report.kept += 1
+            continue
+        try:
+            hubspot.archive_deal(deal["id"])
+            report.deals += 1
+        except Exception as exc:  # noqa: BLE001
+            report.failed += 1
+            report.errors.append(f"deal {deal['id']}: {exc}")
+
+    for contact in hubspot.list_contacts():
+        if not is_seeded_contact(contact.get("email", "")):
+            report.kept += 1
+            continue
+        try:
+            hubspot.archive_contact(contact["id"])
+            report.contacts += 1
+        except Exception as exc:  # noqa: BLE001
+            report.failed += 1
+            report.errors.append(f"contact {contact['id']}: {exc}")
+
+    return report
+
+
 def seed(hubspot, client, now: datetime) -> SeedReport:
     """Write the board. One deal that will not write does not stop the rest.
 

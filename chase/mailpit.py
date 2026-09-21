@@ -78,6 +78,20 @@ class MailpitPoller:
             )
         return replies
 
+    def delete_all_messages(self) -> None:
+        """Empty the inbox, so a demo does not open on last week's chases.
+
+        Mailpit only ever holds mail this project sent to itself, so there is nothing
+        here that needs the care `archive_seed` takes on the portal.
+        """
+        url = f"{self.base_url}/api/v1/messages"
+        try:
+            response = self.http.request("DELETE", url)
+        except Exception as exc:  # noqa: BLE001
+            raise MailpitError(f"DELETE /api/v1/messages failed: {exc}") from exc
+        if getattr(response, "status_code", 0) >= 400:
+            raise MailpitError(f"DELETE /api/v1/messages returned {response.status_code}")
+
     # -- plumbing -------------------------------------------------------------
 
     @staticmethod

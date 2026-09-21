@@ -163,6 +163,56 @@ def test_dry_is_accepted_and_claims_nothing(tmp_path, capsys, no_dotenv, monkeyp
     conn.close()
 
 
+# --- reset -------------------------------------------------------------------
+# The local half is harmless. The portal half archives real objects in a live account,
+# so it must never happen without --portal, and a plain reset must reach no network.
+
+
+def test_reset_without_portal_touches_nothing_remote(tmp_path, capsys, no_dotenv, monkeypatch):
+    monkeypatch.setattr(cli, "archive_seed", _raise(AssertionError("must not be called")))
+    monkeypatch.setattr(cli, "HubSpotClient", _raise(AssertionError("must not be built")))
+    monkeypatch.setattr(cli, "MailpitPoller", _raise(AssertionError("must not be built")))
+    assert main(["--db", str(tmp_path / "chase.db"), "reset"]) == 0
+    out = capsys.readouterr().out
+    assert "cleared the send log" in out
+    assert "--portal" in out, "the remaining half is offered, not hidden"
+
+
+def test_reset_portal_archives_and_clears_mailpit(tmp_path, capsys, no_dotenv, monkeypatch):
+    from chase.seed import ArchiveReport
+
+    cleared = []
+    monkeypatch.setenv("HUBSPOT_TOKEN", "pat-test")
+    monkeypatch.setattr(cli, "HubSpotClient", lambda token: object())
+    monkeypatch.setattr(cli, "archive_seed", lambda hs: ArchiveReport(deals=24, contacts=24))
+    monkeypatch.setattr(
+        cli, "MailpitPoller", lambda base_url: type("P", (), {"delete_all_messages": lambda s: cleared.append(1)})()
+    )
+    assert main(["--db", str(tmp_path / "chase.db"), "reset", "--portal"]) == 0
+    assert cleared == [1]
+    assert "archived: 24 deals, 24 contacts" in capsys.readouterr().out
+
+
+def test_reset_portal_reports_a_mailpit_that_will_not_clear(tmp_path, capsys, no_dotenv, monkeypatch):
+    """The portal is the half that matters, so a full inbox must not hide a good archive."""
+    from chase.mailpit import MailpitError
+    from chase.seed import ArchiveReport
+
+    monkeypatch.setenv("HUBSPOT_TOKEN", "pat-test")
+    monkeypatch.setattr(cli, "HubSpotClient", lambda token: object())
+    monkeypatch.setattr(cli, "archive_seed", lambda hs: ArchiveReport(deals=24, contacts=24))
+
+    class Dead:
+        def delete_all_messages(self):
+            raise MailpitError("connection refused")
+
+    monkeypatch.setattr(cli, "MailpitPoller", lambda base_url: Dead())
+    assert main(["--db", str(tmp_path / "chase.db"), "reset", "--portal"]) == 1
+    captured = capsys.readouterr()
+    assert "archived: 24 deals" in captured.out, "the archive still reports what it did"
+    assert "could not clear Mailpit" in captured.err
+
+
 # --- the .env loader ---------------------------------------------------------
 
 

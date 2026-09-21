@@ -324,6 +324,38 @@ class HubSpotClient:
             f"/crm/v4/objects/deals/{deal_id}/associations/default/contacts/{contact_id}",
         )
 
+    # -- reads and writes reset needs ------------------------------------------
+    # These run against a portal that may hold real deals, so they list and hand back
+    # everything; deciding what carries the seed's marks is seed.py's job and is done on
+    # this side of the wire. No server-side name match is trusted to make that call.
+
+    def list_deals(self, limit: int = SEARCH_LIMIT) -> list[dict]:
+        """Every deal, as `{id, name}`. One page covers the demo portal."""
+        data = self._request(
+            "GET", "/crm/v3/objects/deals", params={"properties": "dealname", "limit": limit}
+        )
+        return [
+            {"id": str(r.get("id", "")), "name": (r.get("properties") or {}).get("dealname") or ""}
+            for r in data.get("results") or []
+        ]
+
+    def list_contacts(self, limit: int = SEARCH_LIMIT) -> list[dict]:
+        """Every contact, as `{id, email}`."""
+        data = self._request(
+            "GET", "/crm/v3/objects/contacts", params={"properties": "email", "limit": limit}
+        )
+        return [
+            {"id": str(r.get("id", "")), "email": (r.get("properties") or {}).get("email") or ""}
+            for r in data.get("results") or []
+        ]
+
+    def archive_deal(self, deal_id: str) -> None:
+        """Archive, not delete: HubSpot keeps it recoverable for 90 days."""
+        self._request("DELETE", f"/crm/v3/objects/deals/{deal_id}")
+
+    def archive_contact(self, contact_id: str) -> None:
+        self._request("DELETE", f"/crm/v3/objects/contacts/{contact_id}")
+
     def _still_in(self, deal_id: str, expected: str) -> bool:
         """Re-read one deal's stage. False on anything but a clear match."""
         self.stage_map  # ensure the pipeline is loaded before any label lookup

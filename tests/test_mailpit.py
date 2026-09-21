@@ -129,6 +129,29 @@ def test_an_unreachable_mailpit_raises():
         poller.poll_replies()
 
 
+# --- emptying the inbox ------------------------------------------------------
+
+
+def test_delete_all_asks_mailpit_to_empty_itself():
+    poller, http = make()
+    poller.delete_all_messages()
+    call = http.calls[0]
+    assert call["method"] == "DELETE"
+    assert call["url"] == "http://localhost:8025/api/v1/messages"
+
+
+def test_delete_all_raises_when_mailpit_refuses():
+    poller, _ = make(status_code=500)
+    with pytest.raises(MailpitError):
+        poller.delete_all_messages()
+
+
+def test_delete_all_raises_when_mailpit_is_unreachable():
+    poller, _ = make(raises=ConnectionRefusedError("no mailpit on 8025"))
+    with pytest.raises(MailpitError):
+        poller.delete_all_messages()
+
+
 def test_a_trailing_slash_on_the_base_url_does_not_double_up():
     http = FakeHTTP(Response(json_body={"messages": []}))
     MailpitPoller(base_url="http://localhost:8025/", http=http).poll_replies()
