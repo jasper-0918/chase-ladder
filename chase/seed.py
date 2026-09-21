@@ -5,7 +5,10 @@ without the numbers moving. The board is computed by `demo_deals`, which touches
 and is therefore the part worth asserting; `seed` is the thin loop that writes it.
 
 Two marks make the seed findable later: every deal name starts `Q-` and every contact
-lives at `customer.example`. `reset` uses them to archive what it wrote and nothing else,
+lives at `customer.example.com`, a domain IANA reserves for documentation so it can never
+belong to a real person. The bare `.example` TLD the spec suggests is refused by HubSpot
+outright as INVALID_EMAIL, as are `.invalid` and `.test`, all verified against the live
+API on 2026-09-21. `reset` uses them to archive what it wrote and nothing else,
 which matters because this runs against a real portal that may hold real deals.
 
 Dates are relative to `clock.now()`, never to the wall clock, so a board seeded under
@@ -17,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-CONTACT_DOMAIN = "customer.example"
+CONTACT_DOMAIN = "customer.example.com"
 DEAL_PREFIX = "Q-"
 
 # Ages in days, chosen so a 3/7/14 ladder fires all three steps on the very first run

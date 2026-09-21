@@ -197,10 +197,10 @@ def test_only_the_seeds_own_prefix_counts(name, seeded):
 @pytest.mark.parametrize(
     "email,seeded",
     [
-        ("nadia.fenton@customer.example", True),
-        ("NADIA.FENTON@CUSTOMER.EXAMPLE", True),
+        ("nadia.fenton@customer.example.com", True),
+        ("NADIA.FENTON@CUSTOMER.EXAMPLE.COM", True),
         ("someone@realbusiness.com.au", False),
-        ("customer.example@gmail.com", False),
+        ("customer.example.com@gmail.com", False),
         ("", False),
     ],
 )
@@ -217,7 +217,7 @@ def test_archive_leaves_real_deals_and_real_people_alone():
             {"id": "3", "name": "Q-0401 SEO retainer, Brunswick Bakehouse"},
         ],
         contacts=[
-            {"id": "c1", "email": "nadia.fenton@customer.example"},
+            {"id": "c1", "email": "nadia.fenton@customer.example.com"},
             {"id": "c2", "email": "real.person@theirbusiness.com.au"},
         ],
     )
@@ -264,7 +264,7 @@ def test_deals_go_before_contacts():
     archive_seed(
         Ordered(
             deals=[{"id": "1", "name": "Q-0400 a"}],
-            contacts=[{"id": "c1", "email": "a@customer.example"}],
+            contacts=[{"id": "c1", "email": "a@customer.example.com"}],
         )
     )
     assert order == ["deal", "contact"]
