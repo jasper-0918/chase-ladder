@@ -186,6 +186,28 @@ def test_read_deal_with_no_associated_contact_leaves_the_email_unset():
     assert not [c for c in http.calls if "contacts" in c["path"]]
 
 
+def test_stage_label_loads_the_pipeline_rather_than_answering_none():
+    """A silent None reads as "a stage outside our pipeline, not ours to chase", so an
+    unloaded map made every deal invisible and the run reported a quiet zero."""
+    hs, http = make({("GET", "/crm/v3/pipelines/deals"): [Response(json_body=PIPELINES)]})
+    assert hs.stage_label("s-sent") == "Sent", "the very first call must resolve"
+    assert [c for c in http.calls if c["path"] == "/crm/v3/pipelines/deals"]
+
+
+def test_stage_label_reads_the_pipeline_only_once():
+    hs, http = make({("GET", "/crm/v3/pipelines/deals"): [Response(json_body=PIPELINES)]})
+    hs.stage_label("s-sent")
+    hs.stage_label("s-won")
+    hs.stage_label("s-lost")
+    assert len([c for c in http.calls if c["path"] == "/crm/v3/pipelines/deals"]) == 1
+
+
+def test_an_unknown_stage_id_is_still_none():
+    hs, _ = make({("GET", "/crm/v3/pipelines/deals"): [Response(json_body=PIPELINES)]})
+    assert hs.stage_label("s-not-in-this-portal") is None
+    assert hs.stage_label(None) is None
+
+
 # --- the writes --------------------------------------------------------------
 
 

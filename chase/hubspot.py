@@ -39,6 +39,9 @@ SEARCH_PROPERTIES = ("dealname", "amount", "dealstage", "quote_sent_at", "last_c
 CONTACT_PROPERTIES = ("email", "firstname", "lastname")
 
 SEARCH_LIMIT = 200  # one page covers the demo; paging is not implemented on purpose
+# The list endpoints cap at 100, where search allows 200. Asking for more is a 400,
+# not a truncation, verified against the live API on 2026-09-21.
+LIST_LIMIT = 100
 REQUEST_TIMEOUT = 10.0
 
 # The only stage the ladder moves a deal out of after a send, and the one the run has
@@ -170,7 +173,19 @@ class HubSpotClient:
             ) from None
 
     def stage_label(self, stage_id: str | None) -> str | None:
-        return self._id_to_label.get(stage_id) if stage_id else None
+        """The label for a stage id, loading the pipeline first if nobody has yet.
+
+        It used to read the map directly, which returned None for every id until some
+        other call happened to load it. None means "a stage outside our pipeline, not
+        ours to chase", so an unloaded map made the whole board invisible and the run
+        reported a quiet zero. `read_deal` carried a bare `self.stage_map` line to work
+        around it, and callers that forgot were wrong in a way nothing failed on. This
+        now matches `stage_id`, which has always loaded lazily.
+        """
+        if not stage_id:
+            return None
+        self.stage_map
+        return self._id_to_label.get(stage_id)
 
     # -- the protocol ---------------------------------------------------------
 
@@ -329,7 +344,7 @@ class HubSpotClient:
     # everything; deciding what carries the seed's marks is seed.py's job and is done on
     # this side of the wire. No server-side name match is trusted to make that call.
 
-    def list_deals(self, limit: int = SEARCH_LIMIT) -> list[dict]:
+    def list_deals(self, limit: int = LIST_LIMIT) -> list[dict]:
         """Every deal, as `{id, name}`. One page covers the demo portal."""
         data = self._request(
             "GET", "/crm/v3/objects/deals", params={"properties": "dealname", "limit": limit}
@@ -339,7 +354,7 @@ class HubSpotClient:
             for r in data.get("results") or []
         ]
 
-    def list_contacts(self, limit: int = SEARCH_LIMIT) -> list[dict]:
+    def list_contacts(self, limit: int = LIST_LIMIT) -> list[dict]:
         """Every contact, as `{id, email}`."""
         data = self._request(
             "GET", "/crm/v3/objects/contacts", params={"properties": "email", "limit": limit}
