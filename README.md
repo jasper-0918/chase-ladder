@@ -4,42 +4,50 @@ Chase Ladder chases quotes a small business sent and never heard back on. It is 
 open deals from HubSpot Free and email each customer at set steps, such as 3, 7 and 14 days after
 the quote. The design stops the chase when the customer replies or the deal is won or lost.
 
-## Status, 2026-09-13
+## Status, 2026-09-21
 
-Not usable yet: no command sends real email or reads a real inbox.
+`run` works. It reads open deals from HubSpot, polls Mailpit for replies, and sends over SMTP.
 
-Built and tested on `main`, with 176 tests passing:
+Built and tested on `main`, with 226 tests passing:
 
 - the clock, YAML loader and ladder arithmetic
 - the send window and SQLite send log
 - the templates, run report and `run_ladder`
 - `HubSpotClient`, over a fake transport
+- `SmtpSender`, including which SMTP failures may be retried and which may never be
+- the Mailpit reply poll and its plus-address parse
+- the CLI, including the `.env` loader
 
-`status` and `reset` work. `run` exits 2 with a message that still lists the HubSpot client as
-missing. `SmtpSender` is written but not wired or tested.
+`status`, `reset`, `run` and `run --dry` all work. Against a live portal with Mailpit up,
+`run --dry` completes and reports.
+
+**No chase has actually been sent yet**, because seeding is still unbuilt and the demo portal
+holds no deals in Sent or Chasing. One deal created by hand, with `quote_sent_at` a few days back
+and a contact attached, is enough to watch a chase land in Mailpit.
 
 Designed, not built:
 
-- reply detection through Mailpit
+- HubSpot seeding, `doctor`, Docker Compose and the demo video
 - the HTTP routes and the Friday digest over Telegram
 - n8n scheduling and the Groq opening line
-- HubSpot seeding, `doctor`, Docker Compose and the demo video
 
 Known gaps:
 
 - No test fails if `db.claim` or `db.record_stop` uses a plain `BEGIN`.
-- `run_ladder` reads and claims one due deal at a time, where the spec reads them all first. A
-  failed read partway aborts the run after earlier sends and loses its report.
+- `run_ladder` reads and claims one due deal at a time, where the spec reads them all first. The
+  run no longer loses its report when a read fails partway, but the read pattern still differs
+  from the spec.
 - `run._send_one` stamps each claim with the run's `now`, not the clock at claim time. In a run
   longer than the grace window, five minutes by default, a late claim can look unresolved to
   `status` or an overlapping run while it is still sending.
-- An error while building the message, after the claim, leaves the row `claimed` with nothing
-  sent. The run then ends without a report.
-- `patch_after_send` moves a Sent deal to Chasing from the stage read before the send and never
-  reads again. A move to Won or Lost during the send is undone, and later runs keep chasing.
 - `send_window.tz` is not checked at load, so a misspelt zone fails after the reply poll.
 - `run_ladder` moves a Sent or Chasing deal to Replied for any earlier reply stop. The spec limits
   it to this run's.
+
+Three gaps closed on 2026-09-21, each with tests that reproduce the failure first: a deal closed
+by the customer mid-send is no longer dragged back and chased again; a raise between the claim and
+the send is now a retryable failure rather than a stranded row and a lost run; and a HubSpot read
+that fails after a send ends the run with its report instead of throwing it away.
 
 ## What it claims
 

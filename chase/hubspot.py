@@ -100,6 +100,19 @@ def format_hs_datetime(value: datetime) -> str:
     return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def format_hs_date(value: datetime) -> str:
+    """A HubSpot Date property, as a plain `YYYY-MM-DD` at midnight UTC.
+
+    Spec section 4.12 says epoch milliseconds is "the only form a HubSpot Date property
+    accepts". The live spike disproved that: a plain ISO date works, and the real
+    constraint is midnight. Epoch milliseconds for 04:30 UTC was refused outright with
+    `400 INVALID_DATE`, "is at 4:30:0.0 UTC, not midnight!". So the day is taken in UTC
+    and the time of day is dropped rather than rounded, because a quote dated "today"
+    must not become tomorrow for anyone east of Greenwich.
+    """
+    return value.astimezone(timezone.utc).strftime("%Y-%m-%d")
+
+
 class HubSpotClient:
     """Implements the run's `HubSpot` protocol.
 
@@ -261,6 +274,55 @@ class HubSpotClient:
         if stage is not None and self._still_in(deal_id, MOVABLE_FROM_STAGE):
             properties["dealstage"] = self.stage_id(stage)
         self._request("PATCH", f"/crm/v3/objects/deals/{deal_id}", json={"properties": properties})
+
+    # -- writes the seed needs -------------------------------------------------
+    # Creation lives here rather than in seed.py so that every call that reaches the
+    # wire is in one file, and so the label-never-reaches-the-wire rule holds for the
+    # seed too: `stage` arrives as a label and leaves as an id.
+
+    def create_contact(self, email: str, first_name: str, last_name: str) -> str:
+        data = self._request(
+            "POST",
+            "/crm/v3/objects/contacts",
+            json={
+                "properties": {
+                    "email": email,
+                    "firstname": first_name,
+                    "lastname": last_name,
+                }
+            },
+        )
+        return str(data.get("id", ""))
+
+    def create_deal(
+        self,
+        name: str,
+        amount: float,
+        stage: str,
+        quote_sent_at: datetime | None = None,
+    ) -> str:
+        properties: dict[str, str] = {
+            "dealname": name,
+            "amount": f"{amount:.2f}",
+            "dealstage": self.stage_id(stage),
+        }
+        if quote_sent_at is not None:
+            properties["quote_sent_at"] = format_hs_date(quote_sent_at)
+        if self.pipeline_id:
+            properties["pipeline"] = self.pipeline_id
+        data = self._request("POST", "/crm/v3/objects/deals", json={"properties": properties})
+        return str(data.get("id", ""))
+
+    def associate_contact(self, deal_id: str, contact_id: str) -> None:
+        """The v4 `default` association, so no association type id is hardcoded here.
+
+        A deal with no contact has nobody to email, and the run skips it silently, so
+        this failing is worth an exception rather than a warning.
+        """
+        self._request(
+            "PUT",
+            f"/crm/v4/objects/deals/{deal_id}/associations/default/contacts/{contact_id}",
+        )
 
     def _still_in(self, deal_id: str, expected: str) -> bool:
         """Re-read one deal's stage. False on anything but a clear match."""
