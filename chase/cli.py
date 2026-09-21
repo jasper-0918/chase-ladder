@@ -26,6 +26,7 @@ from chase.mailer import SmtpSender, make_message_id
 from chase.mailpit import DEFAULT_BASE_URL, Mail, MailpitPoller
 from chase.opener import template_opener
 from chase.run import Deps, RunAborted, run_ladder
+from chase.seed import seed
 from chase.templates import build_message
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -127,6 +128,22 @@ def build_deps(client) -> Deps:
     )
 
 
+def cmd_seed(args) -> int:
+    """Write the demo board into the portal. Spec section 4.12.
+
+    Separate from `run` on purpose: this is the only command that creates anything in
+    HubSpot, and it is the one a stranger should have to type deliberately.
+    """
+    load_dotenv(DEFAULT_ENV)
+    client = load_client(_client_name(args), REPO_ROOT / "config")
+    hubspot = HubSpotClient(token=_require_env("HUBSPOT_TOKEN"))
+    report = seed(hubspot, client, clock.now())
+    print(report.summary_line())
+    for line in report.errors:
+        print(f"  {line}", file=sys.stderr)
+    return 0 if report.failed == 0 else 1
+
+
 def cmd_run(args) -> int:
     """One ladder pass. Exit 0 only when the report says `ok`, so a scheduler that reads
     the exit code sees a failed rung as a failure without parsing the summary."""
@@ -157,7 +174,8 @@ def cmd_run(args) -> int:
 
 
 def cmd_reset(args) -> int:
-    """The SQLite half. Clearing Mailpit and re-seeding HubSpot arrive in sitting 2."""
+    """The SQLite half only. Archiving the seeded deals and clearing Mailpit are still
+    unbuilt, so this clears the send log and says plainly what it did not touch."""
     conn = db.connect(args.db)
     db.init(conn)
     try:
@@ -166,7 +184,8 @@ def cmd_reset(args) -> int:
         conn.execute("DELETE FROM stops")
         conn.execute("COMMIT")
         print(f"cleared the send log at {args.db}")
-        print("Mailpit messages and the HubSpot seed are not touched yet (sitting 2).")
+        print("Mailpit messages and the seeded HubSpot deals are NOT touched: archiving")
+        print("them is not built, so a re-seed would double the board.")
         return 0
     finally:
         conn.close()
@@ -182,6 +201,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("status", cmd_status, "print the send log, the stops and the clock"),
         ("run", cmd_run, "one ladder pass"),
         ("reset", cmd_reset, "clear the local send log"),
+        ("seed", cmd_seed, "write the 24-deal demo board into the portal"),
     ]:
         p = sub.add_parser(name, help=help_text)
         p.set_defaults(handler=handler)
