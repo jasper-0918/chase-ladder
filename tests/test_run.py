@@ -246,6 +246,77 @@ def test_a_refused_send_is_failed_and_retryable(conn, client, wire):
     assert db.log_rows_for(conn, "1")[0]["status"] == "sent"
 
 
+# RunAborted promises the caller that nothing was claimed. Once a message has gone out
+# that promise is false, and raising throws away the only record of which quotes were
+# chased. So a read that fails partway ends the run with its report instead.
+
+
+def test_a_read_that_fails_after_a_send_ends_the_run_with_its_report(conn, client, wire):
+    class FlakyHubSpot(FakeHubSpot):
+        def read_deal(self, deal_id):
+            if deal_id == "2":
+                raise RuntimeError("429 from HubSpot")
+            return super().read_deal(deal_id)
+
+    mail = FakeMail()
+    hubspot = FlakyHubSpot([quote("1", 3), quote("2", 8), quote("3", 20)])
+    report = run_ladder(conn, client, NOW, wire(hubspot, mail))
+    assert report.sent == 1, "the first quote really was chased and the report says so"
+    assert len(mail.sent) == 1
+    assert report.status == "failed"
+    assert "429" in (report.error or "")
+
+
+def test_a_read_that_fails_before_any_send_still_aborts(conn, client, wire):
+    """Nothing was claimed, so the contract holds and the caller reports 500."""
+
+    class FlakyHubSpot(FakeHubSpot):
+        def read_deal(self, deal_id):
+            raise RuntimeError("429 from HubSpot")
+
+    hubspot = FlakyHubSpot([quote("1", 3)])
+    with pytest.raises(RunAborted, match="HubSpot read failed"):
+        run_ladder(conn, client, NOW, wire(hubspot, FakeMail()))
+
+
+# Between the claim and the send sit the opener and the message builder. A raise in
+# either one used to escape the run: the row stayed `claimed`, which nothing retries,
+# every later candidate went unprocessed, and the caller got an exception instead of a
+# report. Nothing left the building, so the honest outcome is a retryable failure.
+
+
+def test_an_opener_that_raises_is_failed_and_the_run_carries_on(conn, client, wire):
+    hubspot = FakeHubSpot([quote("1", 3), quote("2", 8)])
+    mail = FakeMail()
+
+    def explode(client, candidate, step):
+        if candidate.deal_id == "1":
+            raise RuntimeError("Groq returned nonsense")
+        return ("Hope the week is treating you well.", False)
+
+    report = run_ladder(conn, client, NOW, wire(hubspot, mail, opener=explode))
+    assert report.failed == 1
+    assert report.sent == 1, "the second quote is still chased"
+    assert db.log_rows_for(conn, "1")[0]["status"] == "failed"
+    assert len(mail.sent) == 1
+
+
+def test_a_message_that_cannot_be_built_is_failed_and_retryable(conn, client, wire):
+    hubspot = FakeHubSpot([quote("1", 3)])
+    mail = FakeMail()
+    deps = wire(hubspot, mail)
+    deps.build_message = lambda *a, **k: (_ for _ in ()).throw(KeyError("first_name"))
+
+    report = run_ladder(conn, client, NOW, deps)
+    assert report.failed == 1 and report.sent == 0
+    assert report.status == "failed"
+    assert db.log_rows_for(conn, "1")[0]["status"] == "failed"
+    assert mail.sent == [], "nothing reached the server"
+    # Nothing was sent, so the next run is free to try that rung again.
+    ok = run_ladder(conn, client, NOW, wire(hubspot, FakeMail()))
+    assert ok.sent == 1
+
+
 def test_an_ambiguous_send_leaves_the_row_claimed_and_never_retries(conn, client, wire):
     """The one case that could deliver twice, so it never auto-retries. Spec 4.4."""
     hubspot = FakeHubSpot([quote("1", 3)])

@@ -192,6 +192,7 @@ def test_read_deal_with_no_associated_contact_leaves_the_email_unset():
 def test_patch_after_send_writes_the_timestamp_and_the_stage_id():
     routes = {
         ("GET", "/crm/v3/pipelines/deals"): [Response(json_body=PIPELINES)],
+        ("GET", "/crm/v3/objects/deals/7"): [Response(json_body=deal(deal_id="7"))],
         ("PATCH", "/crm/v3/objects/deals/7"): [Response(json_body={})],
     }
     hs, http = make(routes)
@@ -201,6 +202,59 @@ def test_patch_after_send_writes_the_timestamp_and_the_stage_id():
     props = [c for c in http.calls if c["method"] == "PATCH"][0]["json"]["properties"]
     assert props["last_chase_at"] == "2026-09-07T12:30:00Z"
     assert props["dealstage"] == "s-chasing"
+
+
+# The send leaves the SQLite transaction, so a customer can accept, or the owner can
+# close the deal, while the message is in flight. The stage the run decided on was read
+# before that window. Writing it back blind is how a Won deal was dragged to Chasing and
+# chased again on every later run.
+
+
+@pytest.mark.parametrize("closed_stage", ["s-won", "s-lost", "s-replied"])
+def test_patch_after_send_leaves_a_deal_that_closed_during_the_send(closed_stage):
+    routes = {
+        ("GET", "/crm/v3/pipelines/deals"): [Response(json_body=PIPELINES)],
+        ("GET", "/crm/v3/objects/deals/7"): [
+            Response(json_body=deal(deal_id="7", stage=closed_stage))
+        ],
+        ("PATCH", "/crm/v3/objects/deals/7"): [Response(json_body={})],
+    }
+    hs, http = make(routes)
+    hs.patch_after_send(
+        "7", last_chase_at=datetime(2026, 9, 7, 12, 30, tzinfo=timezone.utc), stage="Chasing"
+    )
+    props = [c for c in http.calls if c["method"] == "PATCH"][0]["json"]["properties"]
+    assert props["last_chase_at"] == "2026-09-07T12:30:00Z"
+    assert "dealstage" not in props
+
+
+def test_patch_after_send_still_stamps_when_the_confirming_read_fails():
+    """A read that will not answer is not permission to move the deal."""
+    routes = {
+        ("GET", "/crm/v3/pipelines/deals"): [Response(json_body=PIPELINES)],
+        ("GET", "/crm/v3/objects/deals/7"): [Response(status_code=500)],
+        ("PATCH", "/crm/v3/objects/deals/7"): [Response(json_body={})],
+    }
+    hs, http = make(routes)
+    hs.patch_after_send(
+        "7", last_chase_at=datetime(2026, 9, 7, 12, 30, tzinfo=timezone.utc), stage="Chasing"
+    )
+    props = [c for c in http.calls if c["method"] == "PATCH"][0]["json"]["properties"]
+    assert props["last_chase_at"] == "2026-09-07T12:30:00Z"
+    assert "dealstage" not in props
+
+
+def test_patch_after_send_without_a_stage_makes_no_confirming_read():
+    """Nothing to guard, so the extra call would be waste on every later rung."""
+    routes = {
+        ("GET", "/crm/v3/pipelines/deals"): [Response(json_body=PIPELINES)],
+        ("PATCH", "/crm/v3/objects/deals/7"): [Response(json_body={})],
+    }
+    hs, http = make(routes)
+    hs.patch_after_send(
+        "7", last_chase_at=datetime(2026, 9, 7, 12, 30, tzinfo=timezone.utc), stage=None
+    )
+    assert not [c for c in http.calls if c["path"] == "/crm/v3/objects/deals/7" and c["method"] == "GET"]
 
 
 def test_patch_after_send_without_a_stage_leaves_the_stage_alone():

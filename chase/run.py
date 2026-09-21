@@ -134,7 +134,16 @@ def run_ladder(
         try:
             fresh = deps.hubspot.read_deal(candidate.deal_id)
         except Exception as exc:  # noqa: BLE001
-            raise RunAborted(f"HubSpot read failed for {candidate.deal_id}: {exc}") from exc
+            detail = f"HubSpot read failed for {candidate.deal_id}: {exc}"
+            if report.sent or report.failed:
+                # RunAborted promises the caller that nothing was claimed. Messages have
+                # already gone out, so that is no longer true and raising would throw
+                # away the only record of which quotes were chased. The run ends here
+                # and the error travels in the report instead.
+                report.error = detail
+                report.failed += 1
+                break
+            raise RunAborted(detail) from exc
 
         if fresh.stage in client.stop_on_stages:
             db.record_stop(conn, candidate.deal_id, "stage", f"stage:{fresh.stage.lower()}", now=now)
@@ -169,10 +178,18 @@ def _send_one(conn, client, candidate, step, now, deps: Deps, report: RunReport)
     if outcome is not Claim.CLAIMED:
         return outcome
 
-    opening_line, from_model = deps.opener(client, candidate, step)
-    if not from_model and step.opener == "groq":
-        report.groq_fallbacks += 1
-    message = deps.build_message(client, candidate, step, opening_line, now, message_id)
+    try:
+        opening_line, from_model = deps.opener(client, candidate, step)
+        if not from_model and step.opener == "groq":
+            report.groq_fallbacks += 1
+        message = deps.build_message(client, candidate, step, opening_line, now, message_id)
+    except Exception:  # noqa: BLE001
+        # The claim is held but nothing was ever handed to the server, so this is the
+        # same shape as a refused connection: retryable, and the run carries on. Letting
+        # it escape stranded the row as `claimed`, skipped every later candidate, and
+        # returned an exception to the caller instead of a report.
+        db.mark(conn, candidate.deal_id, step.step, "failed")
+        return Claim.FAILED
 
     try:
         deps.mail.send(message)
