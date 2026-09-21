@@ -23,10 +23,10 @@ from chase import clock, db
 from chase.config import ConfigError, load_client
 from chase.hubspot import HubSpotClient
 from chase.mailer import SmtpSender, make_message_id
-from chase.mailpit import DEFAULT_BASE_URL, Mail, MailpitPoller
+from chase.mailpit import DEFAULT_BASE_URL, Mail, MailpitError, MailpitPoller
 from chase.opener import template_opener
 from chase.run import Deps, RunAborted, run_ladder
-from chase.seed import seed
+from chase.seed import archive_seed, seed
 from chase.templates import build_message
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -174,8 +174,12 @@ def cmd_run(args) -> int:
 
 
 def cmd_reset(args) -> int:
-    """The SQLite half only. Archiving the seeded deals and clearing Mailpit are still
-    unbuilt, so this clears the send log and says plainly what it did not touch."""
+    """Clear the local send log, and with `--portal` take back what the seed wrote.
+
+    Spec 4.12 has one reset that does all of it. It is split here because the local half
+    is harmless and the portal half archives real objects in a live account, and the two
+    should not be one keystroke apart. A plain `reset` can be typed without thinking.
+    """
     conn = db.connect(args.db)
     db.init(conn)
     try:
@@ -184,11 +188,33 @@ def cmd_reset(args) -> int:
         conn.execute("DELETE FROM stops")
         conn.execute("COMMIT")
         print(f"cleared the send log at {args.db}")
-        print("Mailpit messages and the seeded HubSpot deals are NOT touched: archiving")
-        print("them is not built, so a re-seed would double the board.")
-        return 0
     finally:
         conn.close()
+
+    if not getattr(args, "portal", False):
+        print("Mailpit and the seeded HubSpot deals were NOT touched. Use --portal for those.")
+        return 0
+
+    load_dotenv(DEFAULT_ENV)
+    failed = 0
+
+    report = archive_seed(HubSpotClient(token=_require_env("HUBSPOT_TOKEN")))
+    print(report.summary_line())
+    for line in report.errors:
+        print(f"  {line}", file=sys.stderr)
+    failed += report.failed
+
+    poller = MailpitPoller(base_url=os.environ.get("MAILPIT_URL") or DEFAULT_BASE_URL)
+    try:
+        poller.delete_all_messages()
+        print("cleared the Mailpit inbox")
+    except MailpitError as exc:
+        # The portal is the half that matters; a full inbox is cosmetic, so this is
+        # reported rather than allowed to hide a successful archive.
+        print(f"could not clear Mailpit: {exc}", file=sys.stderr)
+        failed += 1
+
+    return 0 if failed == 0 else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -210,6 +236,12 @@ def build_parser() -> argparse.ArgumentParser:
                 "--dry",
                 action="store_true",
                 help="read, decide and report, but claim and send nothing",
+            )
+        if name == "reset":
+            p.add_argument(
+                "--portal",
+                action="store_true",
+                help="also archive the seeded HubSpot deals and clear Mailpit",
             )
     return parser
 

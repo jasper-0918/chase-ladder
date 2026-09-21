@@ -17,7 +17,10 @@ from chase.seed import (
     CONTACT_DOMAIN,
     DEAL_PREFIX,
     LIVE_AGES,
+    archive_seed,
     demo_deals,
+    is_seeded_contact,
+    is_seeded_deal,
     seed,
 )
 
@@ -144,6 +147,140 @@ def test_all_three_rungs_are_due_on_the_first_run(client):
 
 
 # --- writing it ---------------------------------------------------------------
+
+
+# --- taking it back ----------------------------------------------------------
+# reset runs against a portal that may hold real deals. Every test below exists to
+# prove one thing: nothing without the seed's mark is ever archived.
+
+
+class FakePortal:
+    def __init__(self, deals, contacts, fail_on=None):
+        self._deals = deals
+        self._contacts = contacts
+        self.fail_on = fail_on
+        self.archived_deals: list[str] = []
+        self.archived_contacts: list[str] = []
+
+    def list_deals(self, limit=200):
+        return list(self._deals)
+
+    def list_contacts(self, limit=200):
+        return list(self._contacts)
+
+    def archive_deal(self, deal_id):
+        if self.fail_on == deal_id:
+            raise RuntimeError("409 from HubSpot")
+        self.archived_deals.append(deal_id)
+
+    def archive_contact(self, contact_id):
+        if self.fail_on == contact_id:
+            raise RuntimeError("409 from HubSpot")
+        self.archived_contacts.append(contact_id)
+
+
+@pytest.mark.parametrize(
+    "name,seeded",
+    [
+        ("Q-0400 website rebuild, Marrickville Cycles", True),
+        ("Q-0999 anything", True),
+        ("Roof replacement, real customer", False),
+        ("q-0400 lowercase prefix", False),
+        ("A quote Q-0400 mentioned mid-name", False),
+        ("", False),
+    ],
+)
+def test_only_the_seeds_own_prefix_counts(name, seeded):
+    assert is_seeded_deal(name) is seeded
+
+
+@pytest.mark.parametrize(
+    "email,seeded",
+    [
+        ("nadia.fenton@customer.example", True),
+        ("NADIA.FENTON@CUSTOMER.EXAMPLE", True),
+        ("someone@realbusiness.com.au", False),
+        ("customer.example@gmail.com", False),
+        ("", False),
+    ],
+)
+def test_only_the_seeds_own_domain_counts(email, seeded):
+    assert is_seeded_contact(email) is seeded
+
+
+def test_archive_leaves_real_deals_and_real_people_alone():
+    """The test this whole module exists for."""
+    portal = FakePortal(
+        deals=[
+            {"id": "1", "name": "Q-0400 website rebuild, Marrickville Cycles"},
+            {"id": "2", "name": "Kitchen fitout, a paying customer"},
+            {"id": "3", "name": "Q-0401 SEO retainer, Brunswick Bakehouse"},
+        ],
+        contacts=[
+            {"id": "c1", "email": "nadia.fenton@customer.example"},
+            {"id": "c2", "email": "real.person@theirbusiness.com.au"},
+        ],
+    )
+    report = archive_seed(portal)
+    assert portal.archived_deals == ["1", "3"]
+    assert portal.archived_contacts == ["c1"]
+    assert report.deals == 2 and report.contacts == 1
+    assert report.kept == 2, "the real deal and the real person"
+
+
+def test_an_empty_portal_archives_nothing():
+    report = archive_seed(FakePortal(deals=[], contacts=[]))
+    assert (report.deals, report.contacts, report.failed) == (0, 0, 0)
+
+
+def test_one_archive_that_fails_does_not_stop_the_rest():
+    portal = FakePortal(
+        deals=[
+            {"id": "1", "name": "Q-0400 a"},
+            {"id": "2", "name": "Q-0401 b"},
+            {"id": "3", "name": "Q-0402 c"},
+        ],
+        contacts=[],
+        fail_on="2",
+    )
+    report = archive_seed(portal)
+    assert portal.archived_deals == ["1", "3"]
+    assert report.deals == 2 and report.failed == 1
+    assert "deal 2" in report.errors[0]
+
+
+def test_deals_go_before_contacts():
+    """A failure partway should leave orphaned contacts, not deals with nobody to
+    email: the ladder cannot see the first and reports the second as broken."""
+    order: list[str] = []
+
+    class Ordered(FakePortal):
+        def archive_deal(self, deal_id):
+            order.append("deal")
+
+        def archive_contact(self, contact_id):
+            order.append("contact")
+
+    archive_seed(
+        Ordered(
+            deals=[{"id": "1", "name": "Q-0400 a"}],
+            contacts=[{"id": "c1", "email": "a@customer.example"}],
+        )
+    )
+    assert order == ["deal", "contact"]
+
+
+def test_a_seeded_board_is_fully_recoverable(client):
+    """Seed then archive leaves the portal as it was found."""
+    written = FakeHubSpot()
+    seed(written, client, NOW)
+    portal = FakePortal(
+        deals=[{"id": str(i), "name": d["name"]} for i, d in enumerate(written.deals)],
+        contacts=[{"id": f"c{i}", "email": c[0]} for i, c in enumerate(written.contacts)],
+    )
+    report = archive_seed(portal)
+    assert report.deals == 24 and report.contacts == 24
+    assert report.kept == 0
 
 
 def test_seed_writes_a_contact_a_deal_and_an_association_for_each(client):

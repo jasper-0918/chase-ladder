@@ -8,7 +8,7 @@ the quote. The design stops the chase when the customer replies or the deal is w
 
 `run` works. It reads open deals from HubSpot, polls Mailpit for replies, and sends over SMTP.
 
-Built and tested on `main`, with 226 tests passing:
+Built and tested on `main`, with 260 tests passing:
 
 - the clock, YAML loader and ladder arithmetic
 - the send window and SQLite send log
@@ -16,18 +16,31 @@ Built and tested on `main`, with 226 tests passing:
 - `HubSpotClient`, over a fake transport
 - `SmtpSender`, including which SMTP failures may be retried and which may never be
 - the Mailpit reply poll and its plus-address parse
+- the 24-deal demo board, and archiving exactly what it wrote
 - the CLI, including the `.env` loader
 
-`status`, `reset`, `run` and `run --dry` all work. Against a live portal with Mailpit up,
-`run --dry` completes and reports.
+`status`, `seed`, `run`, `run --dry`, `reset` and `reset --portal` all work. Against a live
+portal with Mailpit up, `run --dry` completes and reports.
 
-**No chase has actually been sent yet**, because seeding is still unbuilt and the demo portal
-holds no deals in Sent or Chasing. One deal created by hand, with `quote_sent_at` a few days back
-and a contact attached, is enough to watch a chase land in Mailpit.
+### The whole loop
+
+```bash
+docker run -d -p 1025:1025 -p 8025:8025 axllent/mailpit:latest
+python -m chase seed            # 24 deals into the portal
+python -m chase run             # chases land in Mailpit at localhost:8025
+python -m chase status          # the send log
+python -m chase reset --portal  # take it all back
+```
+
+`reset` on its own clears only the local send log. Archiving the seeded deals needs `--portal`,
+because that half reaches a live account and the two should not be one keystroke apart.
+
+**No chase has been sent against a live portal yet.** Everything above runs; nobody has run it
+end to end with real objects.
 
 Designed, not built:
 
-- HubSpot seeding, `doctor`, Docker Compose and the demo video
+- `doctor`, Docker Compose and the demo video
 - the HTTP routes and the Friday digest over Telegram
 - n8n scheduling and the Groq opening line
 
