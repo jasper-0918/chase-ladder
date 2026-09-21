@@ -41,6 +41,11 @@ CONTACT_PROPERTIES = ("email", "firstname", "lastname")
 SEARCH_LIMIT = 200  # one page covers the demo; paging is not implemented on purpose
 REQUEST_TIMEOUT = 10.0
 
+# The only stage the ladder moves a deal out of after a send, and the one the run has
+# to still find there for that move to be safe. Anything else, Chasing already, dragged
+# back to Draft, or closed by the customer mid-send, is left exactly where it is.
+MOVABLE_FROM_STAGE = "Sent"
+
 # What to wait when a 429 arrives with no Retry-After header. The documented Free
 # window is 100 requests per 10 seconds, so 10 seconds is the honest guess.
 DEFAULT_RETRY_AFTER = 10.0
@@ -240,11 +245,35 @@ class HubSpotClient:
     def patch_after_send(
         self, deal_id: str, last_chase_at: datetime, stage: str | None = None
     ) -> None:
-        """Stamp the chase and, on the first rung only, move Sent to Chasing."""
+        """Stamp the chase and, on the first rung only, move Sent to Chasing.
+
+        The stage the run decided on was read before the message went out, and the send
+        leaves the SQLite transaction. A customer can accept, or the owner can close the
+        deal, while it is in flight. Writing that decision back blind is how a Won deal
+        was dragged to Chasing and then chased on every later run, so the move is
+        confirmed against a fresh read and dropped unless the deal is still where the run
+        left it. A read that will not answer is not permission to move it either.
+
+        The stamp always lands. It records that a message went out, which is true however
+        the stage has changed.
+        """
         properties: dict[str, str] = {"last_chase_at": format_hs_datetime(last_chase_at)}
-        if stage is not None:
+        if stage is not None and self._still_in(deal_id, MOVABLE_FROM_STAGE):
             properties["dealstage"] = self.stage_id(stage)
         self._request("PATCH", f"/crm/v3/objects/deals/{deal_id}", json={"properties": properties})
+
+    def _still_in(self, deal_id: str, expected: str) -> bool:
+        """Re-read one deal's stage. False on anything but a clear match."""
+        self.stage_map  # ensure the pipeline is loaded before any label lookup
+        try:
+            data = self._request(
+                "GET",
+                f"/crm/v3/objects/deals/{deal_id}",
+                params={"properties": "dealstage"},
+            )
+        except Exception:  # noqa: BLE001
+            return False
+        return self.stage_label((data.get("properties") or {}).get("dealstage")) == expected
 
     def patch_stage(self, deal_id: str, stage: str) -> None:
         """Move a deal, used to project a reply onto the board as Replied."""
